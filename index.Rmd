@@ -26,8 +26,9 @@ tidy=TRUE, tidy.opts=list(width.cutoff=60), R.options=list(max.print=100))
 Paragraph or two introducing your datasets and variables, why they are interesting to you, etc.
 
 ```{R}
+library(tidyverse)
 # read your datasets in here, e.g., with read_csv()
-
+read_csv()
 ```
 
 #### Tidying: Reshaping
