@@ -19,7 +19,7 @@ tidy=TRUE, tidy.opts=list(width.cutoff=60), R.options=list(max.print=100))
 
 ## Data Wrangling, Exploration, Visualization
 
-### Name and EID here
+### Jacob Risch, jwr2595
 
 #### Introduction 
 
@@ -27,65 +27,220 @@ Paragraph or two introducing your datasets and variables, why they are interesti
 
 ```{R}
 library(tidyverse)
-# read your datasets in here, e.g., with read_csv()
-read_csv()
+install.packages("xlsx")
+library(xlsx)
+homeless <- read_xlsx("~/project1/Homelessness.xlsx")
+manufacturing <- read_xlsx("~/project1/Manufacturing_Stats_by_State.xlsx")
+
+homeless_big <- lapply(1:10, function(i) read_excel("~/project1/Homelessness.xlsx", sheet = i))
+
+
 ```
+
+I will be looking at data on the homeless population and manufacturing employment.
+They share a "Year" variable as well as a state variable (sort of: the data
+will be wrangled so that they have a matching variable). I Think comparing these
+datasets is interesting because it could highlight the correlation between the 
+presence of manufacturing jobs and homelessness.
 
 #### Tidying: Reshaping
 
-If your datasets are tidy already, demonstrate that you can reshape data with pivot wider/longer here (e.g., untidy and then retidy). Alternatively, it may be easier to wait until the wrangling section so you can reshape your summary statistics. Note here if you are going to do this.
 
 ```{R}
-# your tidying code (if applicable; can also wait until wrangling section)
+##I will be looking at the data across states and years (2014-2015), so will need
+#to 
+#1.) Combine the first two datasets in homeless.xlsx, which contain the data
+#for years 2014 and 2015.
+homeless_big[1] %>% as.data.frame -> homeless_2015
+homeless_big[2] %>% as.data.frame -> homeless_2014
+homeless <- homeless_2015 %>% 
+  inner_join(homeless_2014, by = "CoC.Number")
+homeless <- homeless %>% select(-"CoC.Name.y")
+#2.) Pivot longer the homeless data so that the years and Population type are in
+#their own column. Also, get rid of the rows where the "Year" value isn't a year.
+homeless <- homeless %>% pivot_longer(cols = 3:65, names_to = "Population_Type", values_to = "Population")
+homeless <- homeless %>% separate(col = "Population_Type", sep = "\\.\\.", into = c("Population_Type", "Year")) 
+homeless <- homeless %>% filter(Year %in% c(2014, 2015))
+
+#3.) I ultimately want to merge my datasets by state and year, so I want to combine
+#all observations that take place in the same state. County and subdistricts are
+#irrelevant to me. I will also 
+
+homeless %>% separate(col = "CoC.Number", sep = "-", into = c("State_Abbrev.", NA)) %>% mutate_at("Year", as.numeric) %>%
+  group_by(State_Abbrev., Population_Type, Year) %>% summarize(Homeless_Population = sum(Population)) -> homeless_tidy
+
+#4.) I now want to change the state names in my manufacturing dataframe into
+#their respective abbreviations so that I'll be able to merge my homeless_tidy 
+#and the resulting manufacturing_tidy dataframes.
+manufacturing %>% rename(State_Abbrev. = `Geographic area name`) -> manufacturing
+manufacturing %>% mutate(State_Abbrev. = state.abb[match(State_Abbrev., state.name)]) %>%
+  na.omit -> manufacturing
+
+#5.) I want to remove the statistics data from manufacturing and filter out
+#observations with confusing values (e.g. there is a letter where I'd expect
+#a number).
+manufacturing %>% select(c(1:5, (seq(7, 21, 2)))) %>% mutate_at(5:13, as.numeric) %>%
+  na.omit -> manufacturing
+
+
+#6.) Now, since the individual type of manufacturing is not important to me,
+#I want to combine the observations by state and year for number of workers.
+manufacturing %>% group_by(State_Abbrev., Year) %>% summarize(Num_Workers = sum(`Number of employees`)) -> manufacturing_tidy
+
+
 ```
 
+I have essentially cut down the manufacturing and homelessness data to a state
+in which they can be easily joined by their "State Abbrev." and "Year" values.
     
 #### Joining/Merging
 
 ```{R}
-# your joining code
-
-# your joining code
+manufacturing_tidy %>% dim
+homeless_tidy %>% dim
+manufacturing_tidy %>% ungroup() %>% distinct(State_Abbrev.) %>% count()
+homeless_tidy %>% anti_join(manufacturing_tidy, by = "State_Abbrev.")
+homeless_tidy %>% ungroup() %>% distinct(State_Abbrev.) %>% count()
+manufacturing_tidy %>% inner_join(homeless_tidy, by = c("State_Abbrev.", "Year")) -> combined_data
+combined_data %>% unite("Homeless_and_Workers", c(3, 5), sep="_") %>% 
+  separate_rows("Homeless_and_Workers", sep="_") -> combined_buffer
+combined_buffer[seq(1, 5100, 2),]$Population_Type = "Workers"
+combined_buffer %>% distinct -> combined_data2
+combined_data2 %>% rename(Population = Homeless_and_Workers) -> combined_data2
+combined_data2 %>% mutate_at("Population", as.numeric) -> combined_data2
+combined_data2 %>% mutate_at("Year", as.factor) -> combined_data2
+dim(combined_data2)
 ```
-
-Discussions of joining here. Feel encouraged to break up into more than once code chunk and discuss each in turn.
+The tidy manufacturing dataset contains 100 observations with three variables.
+The homeless dataset contains 2805 observations with four variables. 
+I have inner joined the datasets by their year and state. The resulting dataset
+contains 2650 observations, each with 4 variables. Though each data set had the
+same values for the "Year" variable, the "State_Abbrev." variable in the homeless
+dataset had five more possible values: The District of Columbia, the Virgin Islands,
+Puerto Rico, Guam, and NA. The remaining common values are the 50 states of 
+the United States. 
 
 ####  Wrangling
 
+
+
 ```{R}
-# your wrangling code
+#What is the ratio of factory workers to homeless in each state?
+ratioer <- function(x){x / lag(x)}
+combined_data2 %>% group_by(State_Abbrev.) %>% filter(Population_Type == "Total.Homeless" | Population_Type == "Workers") %>%
+  group_by(State_Abbrev., Population_Type)%>% 
+  summarize(mean = mean(Population)) %>% 
+ group_by(State_Abbrev.) %>% summarize_at("mean", ratioer ) %>% rename( Workers_to_Homeless = mean ) %>% na.omit %>% glimpse
+           
+#What state has the highest chronically homeless population?
+combined_data2 %>% filter(Population_Type == "Chronically.Homeless" & Year == 2015) %>% 
+  arrange(desc(Population)) 
 
-# your wrangling code
+#What was the change in number of workers across 2014 and 2015 for each state? What
+#was the change in the number of total homeless across 2014 and 2015 for each state? What
+#state has the greatest net difference between homelessness change and worker change?
+#(Own function defined)
+changer <- function(x){x - lag(x)}
+combined_data2 %>% group_by(State_Abbrev., Population_Type) %>% 
+  filter(Population_Type == "Total.Homeless" |Population_Type == "Workers")%>% 
+  summarize(change = changer(Population)) %>% na.omit %>% 
+  group_by(State_Abbrev.) %>% mutate(Homeless_Worker_Change_Diff = changer(change)) %>% 
+  arrange(desc(Homeless_Worker_Change_Diff)) %>% kable(align = 'c')
 
-# your wrangling code
+#Summary Statistics (3 functions used after grouping):
+combined_data2 %>% group_by(Population_Type) %>% 
+  summarize(mean = mean(Population), sd = sd(Population), median = median(Population)) %>% 
+  arrange(desc(mean))
+
+#Counts of every categorical variable
+combined_data2 %>% group_by(Population_Type) %>% count
+combined_data2 %>% group_by(State_Abbrev.) %>% count
+combined_data2 %>% group_by(Year) %>% count
+
+#What is the five number summary of the number of workers per state?
+fivenum(((combined_data2 %>% filter(Population_Type == "Workers")) $ Population))
+
+#What is the number of unsheltered homeless parenting youth under 18 per state?
+combined_data %>% group_by(State_Abbrev.) %>% filter(str_detect(Population_Type, "Unsheltered.+18$")) %>%
+  arrange(desc(Homeless_Population))
 ```
+I have found that Indiana has the highest proportion of factory workers to 
+homeless. California has the highest chronically homeless population at 32174, while 
+Delaware has the lowest, at only 80. Connecticut had the highest net movement
+towards factory workers, with 403 less homeless and 118032 more factory workers
+between 2014 and 2015. I found that the total mean homeless population in America
+is 11134 homeless, and that the median number of factory workers is 415101. Interestingly,
+Montana has the highest number of unsheltered homeless parenting youth under 18, 
+at 2. 
+The most interesting finding here is that it seems, in general, the amount of homelessness dropped
+from 2014 to 2015, whereas the number of factory workers rose. There must also be 
+some sort of sampling error for unsheltered homeless, as their numbers are near 0
+for numerous states.
 
-Your discussion of wrangling section here. Feel encouraged to break up into more than once code chunk and discuss each in turn.
 
 
 #### Visualizing
 
-```{R}
-# your plot 1
-```
-
-Your discussion of plot 1
 
 ```{R}
-# your plot 2
+combined_data2 %>% filter(Population_Type == "Total.Homeless", Year == 2014) %>% 
+  ggplot(aes(x = State_Abbrev., y = Population)) + geom_bar(stat = "identity", aes(fill = State_Abbrev.)) +
+  scale_y_log10() + 
+  labs(title = "Total Homeless Population by State in 2014", x = "State", y = "Population") +
+  theme_minimal() +
+  theme(legend.position = "None", axis.text.x = element_text(angle = 90, hjust = 1, size = 10)) +
+  geom_hline(yintercept = max((combined_data2 %>% filter(Population_Type == "Total.Homeless", Year == 2014))$Population)) +
+  geom_hline(yintercept = min((combined_data2 %>% filter(Population_Type == "Total.Homeless", Year == 2014))$Population)) +
+  annotate("text", 45, 150000, label = "Max: 113952 in CA") +
+  annotate("text", 45, 500, label = "Min: 757 in WY")
 ```
 
-Your discussion of plot 2
+The plot above visualizes the differences in the total homeless population per
+state in 2014. 
 
 ```{R}
-# your plot 3
+combined_data2 %>% filter(Population_Type == "Workers", Year == 2015) %>% 
+  ggplot(aes(x = State_Abbrev., y = Population)) + geom_bar(stat = "identity", aes(fill = State_Abbrev.)) +
+  labs(title = "Total Factory Worker Population by State in 2015", x = "State", y = "Population") +
+  scale_y_log10() +
+  theme_dark() +
+  theme(legend.position = "None", axis.text.x = element_text(angle = 90, hjust = 1, size = 10)) +
+  geom_hline(yintercept = max((combined_data2 %>% filter(Population_Type == "Workers", Year == 2015))$Population)) +
+  geom_hline(yintercept = min((combined_data2 %>% filter(Population_Type == "Workers", Year == 2015))$Population)) +
+  annotate("text", 45, 5000000, label = "Max: 3343180 in CA") +
+  annotate("text", 45, 500, label = "Min: 1039 in AK")
 ```
 
-Your discussion of plot 3
+This plot visualizes the number of workers in manufacturing per state in 2015.
+
+```{R}
+##I will compare the sheltered_homeless observations (x-axis) against
+##the number of workers in that respective state (y-axis). Color will discern
+##the year.
+combined_data2 %>% filter(Population_Type == "Sheltered.Homeless" | Population_Type == "Workers") %>%
+  pivot_wider(names_from = ("Population_Type"), values_from = ("Population"))%>%
+  ggplot(aes(x = Sheltered.Homeless, y = Workers)) + 
+  theme_light() +
+  scale_x_log10(name = "Factory Worker Population")+
+  scale_y_log10(name= "Sheltered Homeless Population") + annotation_logticks()+
+  geom_point(aes(color = Year)) +
+  geom_smooth(method = "lm", se = F) +
+  labs(title = "Factory Workers Against Sheltered Homeless Population by State", x = "Sheltered Homeless Population", y = "Factory Worker Population")
+ 
+  ?annotation_logticks
+
+```
+
+This is a plot comparing the factory worker population in each state to that 
+state's sheltered homeless population. It appears that the two variables are positiviely correlated.
 
 #### Concluding Remarks
 
-If any!
+There are so many interesting variables that I could add to this tidy dataset.
+I believe a variable describing the longitude and latitude of the capital city
+of each observation could allow me to further analyze geographical causes of
+data peculiarities. More variables I could add are: average temperature, per capita
+GDP, and state income tax rate.
 
 
 
