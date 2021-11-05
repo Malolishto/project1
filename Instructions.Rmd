@@ -46,7 +46,7 @@ data2 <- read_csv("/path/to/dataset2.csv")
 
 #or, if you'd prefer to read it in from some remote location
 
-data1 <- read_csv("https://some.website/dataset1.csv")
+manfacturing <- read_csv("https://some.website/dataset1.csv")
 data2 <- read_csv("https://some.website/dataset2.csv")
 ```
 
